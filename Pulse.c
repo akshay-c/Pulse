@@ -3,6 +3,7 @@
 #include <avr/io.h>
 #include <util/delay.h>
 #include <avr/interrupt.h>
+#include <avr/eeprom.h>
 
 
 #define btnUp 		PINB0
@@ -14,6 +15,8 @@
 #define btnBack 	PINB7
 #define rs 			PD0
 #define en 			PD1
+#define Buzz     	PD2
+#define AdcPin      PINC0
 
 
 #define LCD 	PORTD
@@ -36,19 +39,24 @@ int offdur = 1;
 int tsec = 0;
 int time = 0;
 int totdur = 0;
+unsigned int Threshold = 0x02;
 int adj1;
 int adj2;
 char loc;
+char EEMEM DocName[16];
+char EEMEM DocName2[16];
 
 void initLCD();
 void ClearLCD();
 void LCDdata(char*);
+void LCDchar(char msg);
 void LCDcmd(char);
 void LCDint(int);
 void disppos();
 void dispintpos(int);
 void setintpos(int);
 void showData(int,int,char);
+unsigned int GetAdcValue();
 void disp3();
 void disp4();
 void disp5();
@@ -64,8 +72,11 @@ void IGalvanic(); //1,3,5,10,50,100 Hz, User On 1-9
 
 void GenFreq(int Freq, int DutyCycle,int on, int off);
 void GenPulse(int Freq, int ton);
+void Buzzer(int duration, int beepcount);
+void ReadName();
+void WriteName();
 
-ISR(TIMER2_COMP_vect )
+ISR(TIMER2_COMPA_vect )
 {
 	time --;
 	if(totdur && (time%4 == 0))
@@ -73,14 +84,10 @@ ISR(TIMER2_COMP_vect )
 		if(((time/4)%totdur) == adj1)
 		{
 			DDRB |= (1<<DDB1);
-			LCDcmd(0xCF);
-			LCDdata("On");
 		}
 		if(((time/4)%totdur) == adj2)
 		{
 			DDRB &= ~(1<<DDB1);
-			LCDcmd(0xCF);
-			LCDdata("Off");
 		}
 	}
 	if(time%4 == 0)
@@ -91,13 +98,171 @@ ISR(TIMER2_COMP_vect )
 	if(time == 0)
 	{
 		DDRB &= ~(1<<DDB1);
-		TCCR2=0x00;
+		TCCR2A=0x00;
 		TCCR1A=0x00;
 		TCCR1B=0x00;
-		TIMSK &= ~(1<<OCIE2);
+		TIMSK2 &= ~(1<<OCIE2A);
+		Buzzer(500,3);
 	}
 }
 
+void ReadName(void)
+{
+    char buffer[16], buffer2[16];
+    eeprom_read_block((void*)&buffer, (const void*)&DocName, 16);
+	eeprom_read_block((void*)&buffer2, (const void*)&DocName2, 16);
+	LCDcmd(0x01);
+	LCDcmd(0xC0);
+	LCDdata(buffer);
+	LCDcmd(0x94);
+	LCDdata(buffer2);
+	_delay_ms(5000);
+	LCDcmd(0x01);
+    return;
+}
+
+void WriteName(void)
+{
+	char buffer[32];
+	char fchar = 'A',lchar='Z';
+	char temp;
+	int pos=0;
+	LCDdata("    Set Name");
+	LCDcmd(0xC0);
+	while(BUTTONS&(1<<btnBack))
+	{
+		if(!(BUTTONS&(1<<btnUp)))
+		{
+			//LCDchar('B');
+			if((buffer[pos]=='\0')||(buffer[pos]=='Z'))
+			{
+				temp= ' ';
+			}
+			else if(buffer[pos]==' ')
+			{
+				temp= 'A';
+			}
+			else
+			{
+				temp++;
+				//LCDchar('B');
+				//while(1);
+			}
+			buffer[pos]= temp;
+			if(pos>15)
+			{
+				LCDcmd(0x94+pos-16);
+			}
+			else
+			{
+				LCDcmd((0xC0+(pos)));
+			}
+			LCDchar(temp);
+			while(!(BUTTONS&(1<<btnUp)));
+		}
+		if(!(BUTTONS&(1<<btnDown)))
+		{
+			if((buffer[pos]=='\0')||(buffer[pos]=='A'))
+			{
+				temp= ' ';
+			}
+			else if(buffer[pos]==' ')
+			{
+				temp= 'Z';
+			}
+			else
+			{
+				temp--;
+			}
+			buffer[pos] = temp;
+			if(pos>15)
+			{
+				LCDcmd(0x94+pos-16);
+			}
+			else
+			{
+				LCDcmd((0xC0+(pos)));
+			}
+			LCDchar(temp);
+			while(!(BUTTONS&(1<<btnDown)));
+		}
+		if(!(BUTTONS&(1<<btnLeft)))
+		{
+			if((pos==0))
+			{
+				continue;
+			}
+			else if(pos==15)
+			{
+				LCDcmd(0x04);
+				LCDdata(" ");
+				LCDcmd(0x06);
+				LCDcmd((0xC0)+15);
+				pos--;
+			}
+			else
+			{
+				buffer[pos] = '\0';
+				pos--;
+				LCDcmd(0x04);
+				LCDdata(" ");
+				LCDcmd(0x06);
+			}
+			while(!(BUTTONS&(1<<btnLeft)));
+		}
+		if(!(BUTTONS&(1<<btnRight)))
+		{
+			if((pos==16))
+			{
+				LCDcmd(0x94);
+				buffer[pos]=' ';
+			}
+			else
+			{
+				pos++;
+				buffer[pos]=' ';
+			}
+			while(!(BUTTONS&(1<<btnRight)));
+		}
+		if(!(BUTTONS&(1<<btnEnter)))
+		{
+			eeprom_write_block((const void*)&buffer, (void*)&DocName,16);
+			eeprom_write_block((const void*)&buffer[16], (void*)&DocName2,16);
+			LCDdata("Thank You");
+			_delay_ms(5000);
+			break;
+			while(!(BUTTONS&(1<<btnEnter)));
+		}
+	}
+	while(!(BUTTONS&(1<<btnBack)));
+}
+
+void Buzzer(int duration, int beepcount)
+{
+	DDRD |= 1<<Buzz;
+	for(int i=1;i<beepcount;i++)
+	{
+		PORTD &= ~(1<<Buzz);
+		_delay_ms(duration);
+		PORTD |= 1<<Buzz;
+		_delay_ms(200);
+	}
+}
+
+
+unsigned int  GetAdcValue()
+{
+	
+	DDRC &= ~(1<<DDC1);
+	ADCSRA = (1<<ADEN);
+	ADMUX= 0x00;
+	ADCSRA |= (1<<ADSC) | (1<<REFS0);
+    while (ADCSRA & (1<<ADIF));
+	ADCSRA|=(1<<ADIF);
+	LCDint((int)ADCW);
+	unsigned int value = (unsigned int)ADCW;
+	return value;
+}
 
 void disp3()
 {
@@ -149,10 +314,11 @@ void disp7()
 void stopTimers()
 {
 		DDRB &= ~(1<<DDB1);
-		TCCR2=0x00;
+		TCCR2A=0x00;
 		TCCR1A=0x00;
 		TCCR1B=0x00;
-		TIMSK &= ~(1<<OCIE2);
+		TIMSK2 &= ~(1<<OCIE2A);
+		Buzzer(500,2);
 }
 
 void setintpos(int index)
@@ -230,7 +396,10 @@ void showData(int value, int len, char start)
 	LCDcmd(start);
 	for(int i=0;i<len;i++)
 	{
-		LCDdata(" ");
+		if(value ==0)
+			LCDdata("0");
+		else
+			LCDdata(" ");
 	}
 	LCDcmd(0x10);
 	LCDint(value);
@@ -243,7 +412,7 @@ void Faradiac()
 	disp3();
 	LCDcmd(0x9D);
 	showData(dur, 2,0x9B);
-	loc = 0x9B;
+	loc = 0x9E;
 	setintpos(1);
 	//GenFreq(60, 6, 0xFF);
 	while((BUTTONS&(1<<btnBack)))
@@ -272,6 +441,21 @@ void Faradiac()
 		}
 		if(!(BUTTONS&(1<<btnEnter)))
 		{
+			if(GetAdcValue()>Threshold)
+			{
+				LCDcmd(0x01);
+				Buzzer(1000,1);
+				LCDdata("Make Intensity Zero");
+				_delay_ms(3000);
+				while(!(BUTTONS&(1<<btnEnter)));
+				continue;
+			}
+			LCDcmd(0x01);
+			LCDdata("  Faradiac");
+			disp3();
+			LCDcmd(0x9D);
+			showData(dur, 2,0x9B);
+			loc = 0x9E;
 			GenFreq(60,6,0,0);
 			while(!(BUTTONS&(1<<btnEnter)));
 			
@@ -289,7 +473,7 @@ void SFaradiac()
 	disp4();
 	intcurpos = 0;
 	setintpos(intcurpos);
-	showData(ondur,1,0xC5);
+	showData(ondur,1,0xC9);
 	showData(offdur,1,0x9E);
 	showData(dur,2,0xDB);
 	loc = 0xDE;
@@ -298,6 +482,23 @@ void SFaradiac()
 		
 		if(!(BUTTONS&(1<<btnEnter)))
 		{
+			if(GetAdcValue()>Threshold)
+			{
+				LCDcmd(0x01);
+				Buzzer(1000,1);
+				LCDdata("Make Intensity Zero");
+				_delay_ms(3000);
+				continue;
+			}
+			LCDcmd(0x01);
+			LCDdata("  SFaradiac");
+	disp4();
+	intcurpos = 0;
+	setintpos(intcurpos);
+	showData(ondur,1,0xC9);
+	showData(offdur,1,0x9E);
+	showData(dur,2,0xDB);
+	loc = 0xDE;
 			GenFreq(60,6,ondur,offdur);
 			while(!(BUTTONS&(1<<btnEnter)));
 		}
@@ -388,7 +589,7 @@ void TensNormal()
 	setintpos(intcurpos);
 	showData(freq,3,0xCC);
 	showData(dur,2,0x9B);
-	loc = 0xDE;
+	loc = 0x9E;
 	setintpos(0);
 	while((BUTTONS&(1<<btnBack)))
 	{
@@ -466,6 +667,23 @@ void TensNormal()
 		}
 		if(!(BUTTONS&(1<<btnEnter)))
 		{
+			if(GetAdcValue()>Threshold)
+			{
+				LCDcmd(0x01);
+				Buzzer(1000,1);
+				LCDdata("Make Intensity Zero");
+				_delay_ms(3000);
+				continue;
+			}
+			LCDcmd(0x01);
+	LCDdata("  Tens Normal");
+	disp6();
+	intcurpos = 0;
+	setintpos(intcurpos);
+	showData(freq,3,0xCC);
+	showData(dur,2,0x9B);
+	loc = 0x9E;
+	setintpos(0);
 			GenFreq(freq,50,0,0);
 			while(!(BUTTONS&(1<<btnEnter)));
 			
@@ -487,12 +705,24 @@ void TensBurst()
 	showData(freq,3,0xCC);
 	showData(ondur,1,0x9D);
 	showData(offdur,1,0xDE);
-	loc = 0xDE;
+	loc = 0x9E;
 	while((BUTTONS&(1<<btnBack)))
 	{
 		
 		if(!(BUTTONS&(1<<btnEnter)))
 		{
+			if(GetAdcValue()>Threshold)
+			{
+				LCDcmd(0x01);
+				Buzzer(1000,1);
+				LCDdata("Make Intensity Zero");
+				_delay_ms(3000);
+				continue;
+			}
+			LCDcmd(0x01);
+			disp3();
+			showData(dur,2,0x9B);
+			setintpos(3);
 			GenFreq(freq,50,ondur,offdur);
 			while(!(BUTTONS&(1<<btnEnter)));
 		}
@@ -644,6 +874,20 @@ void Galvanic()
 		}
 		if(!(BUTTONS&(1<<btnEnter)))
 		{
+			if(GetAdcValue()>Threshold)
+			{
+				LCDcmd(0x01);
+				Buzzer(1000,1);
+				LCDdata("Make Intensity Zero");
+				_delay_ms(3000);
+				continue;
+			}
+			LCDcmd(0x01);
+	LCDdata("  Galvanic");
+	disp3();
+	LCDcmd(0x9D);
+	showData(dur, 2,0x9B);
+	loc = 0x9E;
 			GenFreq(120,50,0,0);
 			while(!(BUTTONS&(1<<btnEnter)));
 			
@@ -671,6 +915,23 @@ void IGalvanic()
 		
 		if(!(BUTTONS&(1<<btnEnter)))
 		{
+			if(GetAdcValue()>Threshold)
+			{
+				LCDcmd(0x01);
+				Buzzer(1000,1);
+				LCDdata("Make Intensity Zero");
+				_delay_ms(3000);
+				continue;
+			}
+			LCDcmd(0x01);
+	LCDdata("  IGalvanic");
+	disp5();
+	intcurpos = 0;
+	setintpos(intcurpos);
+	showData(freq,3,0xCC);
+	showData(pulse,3,0x9C);
+	showData(dur,2,0xDB);
+	loc = 0xDE;
 			GenPulse(freq,pulse);
 			while(!(BUTTONS&(1<<btnEnter)));
 		}
@@ -823,7 +1084,7 @@ void GenPulse(int Freq, int ton)
 {
 	DDRB |= (1<<DDB1);
 	time = dur * 4 * 60;
-	OCR2 = 244;
+	OCR2A = 244;
 	totdur = 0;
 	ICR1 = (uint16_t)(F_CPU / (Freq * 64));
 	switch(ton)
@@ -853,8 +1114,9 @@ void GenPulse(int Freq, int ton)
 	TCCR1B |= (1 << CS10) | (1<<CS11);   //1024 prescalar
 	TCCR1B |= (1<<WGM12) | (1<<WGM13);
 	
-	TCCR2 = (1<<WGM21) | (1<<CS22) | (1<<CS21) | (1<<CS20);
-	TIMSK = (1 << OCIE2);
+	TCCR2A = (1<<WGM21);
+	TCCR2B = (1<<CS22) | (1<<CS21) | (1<<CS20);
+	TIMSK2 = (1 << OCIE2A);
 	sei();
 }
 
@@ -862,7 +1124,7 @@ void GenFreq(int Freq, int DutyCycle, int on, int off)
 {
 	DDRB |= (1<<DDB1);
 	time = dur * 4 * 60;
-	OCR2 = 244;
+	OCR2A = 244;
 	totdur = on + off;
 	adj1 = (time/4)%totdur;
 	if(adj1 == 0)
@@ -879,8 +1141,9 @@ void GenFreq(int Freq, int DutyCycle, int on, int off)
 	TCCR1B |= (1 << CS10) | (1<<CS11);   //1024 prescalar
 	TCCR1B |= (1<<WGM12) | (1<<WGM13);
 	
-	TCCR2 = (1<<WGM21) | (1<<CS22) | (1<<CS21) | (1<<CS20);
-	TIMSK = (1 << OCIE2);
+	TCCR2A |= (1<<WGM21);
+	TCCR2B |= (1<<CS22) | (1<<CS21) | (1<<CS20);
+	TIMSK2 = (1 << OCIE2A);
 	sei();
 }
 void LCDcmd(char msg)
@@ -910,6 +1173,18 @@ void LCDdata(char* msg)
 	LCD |= (1<<en);
 	msg++;
 	}
+}
+void LCDchar(char msg)
+{
+	LCD |= (1<<rs);
+	LCD = (LCD & 0x0F) | (msg & 0xF0);
+	LCD &= ~(1<<en);
+	_delay_ms(20);
+	LCD |= (1<<en);
+	LCD = (LCD & 0x0F) | (((msg)<<4) & 0xF0);
+	LCD &= ~(1<<en);
+	_delay_ms(20);
+	LCD |= (1<<en);
 }
 
 void display1()
@@ -989,13 +1264,20 @@ switch(curpos)
 }
 int main()
 {
-	PORTD |= 0xF3;
+	PORTD |= 0xFF;
 	PORTB |= 0xFD;
 	DDRB &= 0x02;
-	DDRD |= (uint8_t)(0xF3);
+	DDRD |= (uint8_t)(0xFF);
 	_delay_ms(50);
 	initLCD();
+	//LCDdata("");
 	LCDcmd(0x80);
+	if(!(BUTTONS&(1<<btnUp)))
+	{
+		while(!(BUTTONS&(1<<btnUp)));
+		WriteName();
+	}
+	ReadName();
 	display1();
 	disppos();
 	while(1)

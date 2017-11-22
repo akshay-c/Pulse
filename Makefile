@@ -7,7 +7,7 @@ OBJCOPY = avr-objcopy
 #-g                 compile with debug information
 #-mmcu=atmega328p   selects the target device
 #-std=gnu99         use the C99 standard language definition
-CFLAGS = -g -mmcu=atmega8 -std=gnu99 -O1
+CFLAGS = -g -mmcu=atmega328 -std=gnu99 -Os
 
 #OBJFLAG sets the flag for making a elf to hex
 OBJFLAG = -j .text -j .data -O ihex
@@ -21,7 +21,7 @@ OBJECTS = ${SOURCES:.c=.o}
 all: ${EXECUTABLE}
 
 $(EXECUTABLE): $(OBJECTS) buildnumber.num
-	$(CC) -g -mmcu=atmega8 -o virtualglove.elf $(OBJECTS)
+	$(CC) -g -mmcu=atmega328 -o virtualglove.elf $(OBJECTS)
 	$(OBJCOPY) $(OBJFLAG) virtualglove.elf virtualglove.hex
 	@echo "-- Build: " $$(cat buildnumber.num)
 
